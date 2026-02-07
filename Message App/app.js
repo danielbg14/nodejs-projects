@@ -1,11 +1,16 @@
 const express = require('express');
 const app = express();
+const rateLimit = require('express-rate-limit');
 
-// Middleware to parse URL-encoded form data and JSON body
+const limiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 100,
+    message: "Too many requests, please try again after a minute."
+});
+
 app.use(express.urlencoded({ extended: true }));
-app.use(express.json()); // For curl POST requests with JSON
+app.use(express.json());
 
-// Homepage with form + curl instructions
 app.get('/', (req, res) => {
     res.send(`
         <html>
@@ -44,7 +49,16 @@ app.get('/', (req, res) => {
     `);
 });
 
-// Handle GET requests (form submission or URL)
+function escapeHtml(str) {
+    return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+app.use('/print', limiter);
 app.get('/print', (req, res) => {
     const message = req.query.msg;
 
@@ -53,6 +67,8 @@ app.get('/print', (req, res) => {
     }
 
     console.log(`Received message: ${message}`);
+
+    const safeMessage = escapeHtml(message);
 
     res.send(`
         <html>
@@ -67,14 +83,13 @@ app.get('/print', (req, res) => {
         </head>
         <body>
             <h2>Your Message:</h2>
-            <div class="message-box">${message}</div>
+            <div class="message-box">${safeMessage}</div>
             <a href="/">Go back</a>
         </body>
         </html>
     `);
 });
 
-// Handle POST requests (for curl or JSON body)
 app.post('/print', (req, res) => {
     const message = req.body.msg;
 

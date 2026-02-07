@@ -1,27 +1,27 @@
 const express = require('express');
 const app = express();
-const mysql = require('mysql');
+const { Pool } = require('pg');
 require('dotenv').config();
 const helmet = require('helmet');
 
 app.use(helmet());
 
-// Create a MySQL connection pool
-const pool = mysql.createPool({
-    connectionLimit: 10,
+// Create a PostgreSQL connection pool
+const pool = new Pool({
     host: process.env.DB_HOST,
     port: process.env.DB_PORT,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME
+    database: process.env.DB_NAME,
+    max: 10
 });
 
 let allowedTables = [];
 
-pool.query('SHOW TABLES', (err, results) => {
-    if (err) return;
+pool.query("SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname='public'", (err, result) => {
+    if (err) return console.error('Error fetching tables:', err);
 
-    const dbTables = results.map(row => Object.values(row)[0]);
+    const dbTables = result.rows.map(row => row.tablename);
 
     if (process.env.ALLOWED_TABLES) {
         const envTables = process.env.ALLOWED_TABLES.split(',').map(t => t.trim());
@@ -50,7 +50,7 @@ app.get('/', (req, res) => {
         <!DOCTYPE html>
         <html>
         <head>
-            <title>MySQL Inspector API</title>
+            <title>PostgreSQL Inspector API</title>
             <style>
                 body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
                 h1 { color: #333; }
@@ -60,25 +60,15 @@ app.get('/', (req, res) => {
             </style>
         </head>
         <body>
-            <h1>MySQL Database Inspector</h1>
-            <p>This API lets you explore your MySQL database structure and data.</p>
-
+            <h1>PostgreSQL Database Inspector</h1>
+            <p>This API lets you explore your PostgreSQL database structure and data.</p>
             <div class="box">
                 <h2>Available Endpoints</h2>
-
-                <p><strong>Database connection check</strong></p>
-                <code>GET /dbcheck</code>
-
-                <p><strong>List all tables</strong></p>
-                <code>GET /tables</code>
-
-                <p><strong>Get table columns</strong></p>
-                <code>GET /tables/:tableName/columns</code>
-
-                <p><strong>Get table rows</strong></p>
-                <code>GET /tables/:tableName/lines</code>
+                <p><strong>Database connection check</strong></p><code>GET /dbcheck</code>
+                <p><strong>List all tables</strong></p><code>GET /tables</code>
+                <p><strong>Get table columns</strong></p><code>GET /tables/:tableName/columns</code>
+                <p><strong>Get table rows</strong></p><code>GET /tables/:tableName/lines</code>
             </div>
-
             <div class="box">
                 <h2>Example curl</h2>
                 <pre>curl http://localhost:3000/dbcheck</pre>
@@ -91,53 +81,53 @@ app.get('/', (req, res) => {
     `);
 });
 
-app.get('/dbcheck' , (req, res) => {
-    pool.getConnection((err, connection) => {
-        if (err) return res.status(500).json({ status: 'error', message: 'Database connection failed' });
-        connection.ping(err => {
-            connection.release();
-            if (err) return res.status(500).json({ status: 'error', message: 'Database ping failed' });
-            res.json({ status: 'success', message: 'Database connection is healthy' });
-        });
-    });
+app.get('/dbcheck', async (req, res) => {
+    try {
+        const client = await pool.connect();
+        await client.query('SELECT 1');
+        client.release();
+        res.json({ status: 'success', message: 'Database connection is healthy' });
+    } catch (err) {
+        res.status(500).json({ status: 'error', message: 'Database connection failed', error: err.message });
+    }
 });
 
-// Endpoint to get all tables in the database
 app.get('/tables', (req, res) => {
+    app.set('json spaces', 2);
     res.json({ tables: allowedTables });
 });
 
-// Endpoint to get columns of a specific table
-app.get('/tables/:tableName/columns', validateTable, (req, res) => {
+app.get('/tables/:tableName/columns', validateTable, async (req, res) => {
     app.set('json spaces', 2);
     const tableName = req.params.tableName;
-    pool.query(`SHOW COLUMNS FROM \`${tableName}\``, (error, results) => {
-        if (error) return res.status(500).json({ error: 'Database query failed' });
-        const columns = results.map(row => ({
-            Field: row.Field,
-            Type: row.Type,
-            Null: row.Null,
-            Key: row.Key,
-            Default: row.Default,
-            Extra: row.Extra
-        }));
-        res.json({ columns });
-    });
+    try {
+        const query = `
+            SELECT column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_name = $1
+            ORDER BY ordinal_position
+        `;
+        const result = await pool.query(query, [tableName]);
+        res.json({ columns: result.rows });
+    } catch (err) {
+        res.status(500).json({ error: 'Database query failed', details: err.message });
+    }
 });
 
-app.get('/tables/:tableName/lines', validateTable, (req, res) => {
+app.get('/tables/:tableName/lines', validateTable, async (req, res) => {
     app.set('json spaces', 2);
     const tableName = req.params.tableName;
-    const limit = Math.min(parseInt(req.query.limit) || 100, 500); // max 500 rows
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
     const offset = parseInt(req.query.offset) || 0;
 
-    pool.query(`SELECT * FROM \`${tableName}\` LIMIT ? OFFSET ?`, [limit, offset], (error, results) => {
-        if (error) return res.status(500).json({ error: 'Database query failed' });
-        res.json({ lines: results });
-    });
+    try {
+        const result = await pool.query(`SELECT * FROM "${tableName}" LIMIT $1 OFFSET $2`, [limit, offset]);
+        res.json({ lines: result.rows });
+    } catch (err) {
+        res.status(500).json({ error: 'Database query failed', details: err.message });
+    }
 });
 
-// Start the server
 const PORT = 3000;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);

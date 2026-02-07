@@ -1,7 +1,7 @@
 {
-  "name": "mysql-inspector-api",
+  "name": "sqlite-inspector-api",
   "version": "1.1.0",
-  "description": "Node.js API for inspecting MySQL tables, columns, and data",
+  "description": "Node.js API for inspecting SQLite tables, columns, and data",
   "main": "app.js",
   "type": "commonjs",
   "scripts": {
@@ -12,7 +12,7 @@
   "license": "ISC",
   "dependencies": {
     "express": "^4.18.2",
-    "mysql": "^2.18.1",
+    "sqlite3": "^5.1.7",
     "dotenv": "^16.4.1",
     "helmet": "^6.2.0"
   },

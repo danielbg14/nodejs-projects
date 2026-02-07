@@ -1,7 +1,7 @@
 {
   "name": "rest-api-for-books",
-  "version": "1.0.0",
-  "description": "A simple Node.js + Express REST API for managing items (books)",
+  "version": "1.1.0",
+  "description": "A simple Node.js + Express REST API for managing books",
   "main": "app.js",
   "type": "commonjs",
   "scripts": {
@@ -12,9 +12,15 @@
   "author": "Daniel K.",
   "license": "ISC",
   "dependencies": {
-    "express": "^4.18.2"
+    "express": "^4.19.2",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.4.0",
+    "express-validator": "^7.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

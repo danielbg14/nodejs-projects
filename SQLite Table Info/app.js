@@ -1,35 +1,40 @@
 const express = require('express');
 const app = express();
-const mysql = require('mysql');
+const sqlite3 = require('sqlite3').verbose();
 require('dotenv').config();
 const helmet = require('helmet');
+const path = require('path');
 
 app.use(helmet());
 
-// Create a MySQL connection pool
-const pool = mysql.createPool({
-    connectionLimit: 10,
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME
-});
+// Create a SQLite connection
+const dbFile = process.env.DB_FILE || path.join(__dirname, 'test.db');
+const db = new sqlite3.Database(dbFile);
 
 let allowedTables = [];
 
-pool.query('SHOW TABLES', (err, results) => {
-    if (err) return;
+const initTables = () => {
+    db.all("SELECT name FROM sqlite_master WHERE type='table'", (err, rows) => {
+        if (err) {
+            console.error('Failed to fetch tables:', err);
+            return;
+        }
 
-    const dbTables = results.map(row => Object.values(row)[0]);
+        // Make sure rows is an array
+        const dbTables = rows.map(r => r.name);
 
-    if (process.env.ALLOWED_TABLES) {
-        const envTables = process.env.ALLOWED_TABLES.split(',').map(t => t.trim());
-        allowedTables = dbTables.filter(t => envTables.includes(t));
-    } else {
-        allowedTables = dbTables;
-    }
-});
+        if (process.env.ALLOWED_TABLES) {
+            const envTables = process.env.ALLOWED_TABLES.split(',').map(t => t.trim());
+            allowedTables = dbTables.filter(t => envTables.includes(t));
+        } else {
+            allowedTables = dbTables;
+        }
+
+        console.log('Allowed tables:', allowedTables);
+    });
+};
+
+initTables();
 
 const validateTable = (req, res, next) => {
     const tableName = req.params.tableName;
@@ -50,7 +55,7 @@ app.get('/', (req, res) => {
         <!DOCTYPE html>
         <html>
         <head>
-            <title>MySQL Inspector API</title>
+            <title>SQLite  Inspector API</title>
             <style>
                 body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
                 h1 { color: #333; }
@@ -60,8 +65,8 @@ app.get('/', (req, res) => {
             </style>
         </head>
         <body>
-            <h1>MySQL Database Inspector</h1>
-            <p>This API lets you explore your MySQL database structure and data.</p>
+            <h1>SQLite  Database Inspector</h1>
+            <p>This API lets you explore your SQLite database structure and data.</p>
 
             <div class="box">
                 <h2>Available Endpoints</h2>
@@ -91,53 +96,48 @@ app.get('/', (req, res) => {
     `);
 });
 
-app.get('/dbcheck' , (req, res) => {
-    pool.getConnection((err, connection) => {
-        if (err) return res.status(500).json({ status: 'error', message: 'Database connection failed' });
-        connection.ping(err => {
-            connection.release();
-            if (err) return res.status(500).json({ status: 'error', message: 'Database ping failed' });
-            res.json({ status: 'success', message: 'Database connection is healthy' });
-        });
+app.get('/dbcheck', (req, res) => {
+    db.all("SELECT name FROM sqlite_master WHERE type='table'", (err, rows) => {
+        if (err) return res.status(500).json({ status: 'error', message: 'DB error', error: err.message });
+        if (rows.length === 0) {
+            return res.status(500).json({ status: 'error', message: 'No tables found in database' });
+        }
+        res.json({ status: 'success', message: 'Database connection is healthy', tables: rows.map(r => r.name) });
     });
 });
 
-// Endpoint to get all tables in the database
 app.get('/tables', (req, res) => {
+    app.set('json spaces', 2);
     res.json({ tables: allowedTables });
 });
 
-// Endpoint to get columns of a specific table
 app.get('/tables/:tableName/columns', validateTable, (req, res) => {
-    app.set('json spaces', 2);
     const tableName = req.params.tableName;
-    pool.query(`SHOW COLUMNS FROM \`${tableName}\``, (error, results) => {
-        if (error) return res.status(500).json({ error: 'Database query failed' });
-        const columns = results.map(row => ({
-            Field: row.Field,
-            Type: row.Type,
-            Null: row.Null,
-            Key: row.Key,
-            Default: row.Default,
-            Extra: row.Extra
+    db.all(`PRAGMA table_info(${tableName})`, (err, rows) => {
+        if (err) return res.status(500).json({ error: 'Database query failed', details: err.message });
+        const columns = rows.map(col => ({
+            Field: col.name,
+            Type: col.type,
+            Null: col.notnull ? 'NO' : 'YES',
+            Default: col.dflt_value,
+            Key: col.pk ? 'PRI' : '',
+            Extra: ''
         }));
         res.json({ columns });
     });
 });
 
 app.get('/tables/:tableName/lines', validateTable, (req, res) => {
-    app.set('json spaces', 2);
     const tableName = req.params.tableName;
-    const limit = Math.min(parseInt(req.query.limit) || 100, 500); // max 500 rows
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
     const offset = parseInt(req.query.offset) || 0;
 
-    pool.query(`SELECT * FROM \`${tableName}\` LIMIT ? OFFSET ?`, [limit, offset], (error, results) => {
-        if (error) return res.status(500).json({ error: 'Database query failed' });
-        res.json({ lines: results });
+    db.all(`SELECT * FROM ${tableName} LIMIT ? OFFSET ?`, [limit, offset], (err, rows) => {
+        if (err) return res.status(500).json({ error: 'Database query failed', details: err.message });
+        res.json({ lines: rows });
     });
 });
 
-// Start the server
 const PORT = 3000;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
