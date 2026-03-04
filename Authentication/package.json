@@ -1,22 +1,22 @@
 {
-  "name": "basic-auth-app",
-  "version": "1.1.0",
-  "description": "A simple Node.js app demonstrating HTTP Basic Authentication",
-  "main": "app.js",
-  "type": "commonjs",
-  "scripts": {
-    "start": "node app.js",
-    "dev": "nodemon app.js"
-  },
-  "author": "Daniel K.",
-  "license": "ISC",
-  "dependencies": {
-    "express": "^4.18.2",
-    "dotenv": "^16.4.1",
-    "express-rate-limit": "^6.7.0",
-    "helmet": "^6.2.0"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.1"
-  }
+    "name": "basic-auth-app",
+    "version": "1.1.0",
+    "description": "A simple Node.js app demonstrating HTTP Basic Authentication",
+    "main": "app.js",
+    "type": "commonjs",
+    "scripts": {
+        "start": "node app.js",
+        "dev": "nodemon app.js"
+    },
+    "author": "Daniel K.",
+    "license": "ISC",
+    "dependencies": {
+        "express": "^4.22.1",
+        "dotenv": "^16.6.1",
+        "express-rate-limit": "^7.4.0",
+        "helmet": "^7.1.0"
+    },
+    "devDependencies": {
+        "nodemon": "^3.0.1"
+    }
 }

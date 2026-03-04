@@ -1,9 +1,11 @@
 const express = require('express');
 const app = express();
 const rateLimit = require('express-rate-limit');
+require('dotenv').config();
 
+// ------------------- Security & Middleware -------------------
 const limiter = rateLimit({
-    windowMs: 60 * 1000,
+    windowMs: 60 * 1000, // 1 minute
     max: 100,
     message: "Too many requests, please try again after a minute."
 });
@@ -11,6 +13,47 @@ const limiter = rateLimit({
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+// ------------------- Swagger Setup -------------------
+const swaggerUi = require('swagger-ui-express');
+const swaggerJsdoc = require('swagger-jsdoc');
+
+const swaggerOptions = {
+    definition: {
+        openapi: "3.0.0",
+        info: {
+            title: "Message App API",
+            version: "1.0.0",
+            description: "API to send and display messages via GET or POST",
+        },
+    },
+    apis: ["./app.js"], // path to this file
+};
+
+const swaggerSpec = swaggerJsdoc(swaggerOptions);
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+// ------------------- HTML Escape Utility -------------------
+function escapeHtml(str) {
+    return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+// ------------------- Routes -------------------
+
+/**
+ * @swagger
+ * /:
+ *   get:
+ *     summary: Root endpoint
+ *     description: Provides HTML instructions for using the Message App
+ *     responses:
+ *       200:
+ *         description: Instruction page
+ */
 app.get('/', (req, res) => {
     res.send(`
         <html>
@@ -49,15 +92,25 @@ app.get('/', (req, res) => {
     `);
 });
 
-function escapeHtml(str) {
-    return str
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
-
+/**
+ * @swagger
+ * /print:
+ *   get:
+ *     summary: Display a message via query parameter
+ *     description: Sends a GET request with `msg` query parameter to display the message
+ *     parameters:
+ *       - in: query
+ *         name: msg
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The message to display
+ *     responses:
+ *       200:
+ *         description: Message displayed successfully
+ *       400:
+ *         description: Missing `msg` query parameter
+ */
 app.use('/print', limiter);
 app.get('/print', (req, res) => {
     const message = req.query.msg;
@@ -66,8 +119,7 @@ app.get('/print', (req, res) => {
         return res.status(400).send("<p>Please provide a message!</p><a href='/'>Go back</a>");
     }
 
-    console.log(`Received message: ${message}`);
-
+    console.log(`Received message via GET: ${message}`);
     const safeMessage = escapeHtml(message);
 
     res.send(`
@@ -90,7 +142,30 @@ app.get('/print', (req, res) => {
     `);
 });
 
-app.post('/print', (req, res) => {
+/**
+ * @swagger
+ * /print:
+ *   post:
+ *     summary: Display a message via POST
+ *     description: Sends a POST request with a JSON body like {"msg":"your message"} to display the message
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               msg:
+ *                 type: string
+ *                 description: The message to display
+ *                 example: Hello via POST
+ *     responses:
+ *       200:
+ *         description: Message returned successfully
+ *       400:
+ *         description: Missing 'msg' in request body
+ */
+app.post('/print', limiter, (req, res) => {
     const message = req.body.msg;
 
     if (!message) {
@@ -98,11 +173,12 @@ app.post('/print', (req, res) => {
     }
 
     console.log(`Received message via POST: ${message}`);
-
     res.json({ message: `The message you sent via POST: ${message}` });
 });
 
-const PORT = 3000;
+// ------------------- Start Server -------------------
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Server is running on http://127.0.0.1:${PORT}`);
+    console.log(`Swagger docs available at http://127.0.0.1:${PORT}/docs`);
 });

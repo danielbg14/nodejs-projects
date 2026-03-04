@@ -6,8 +6,26 @@ const helmet = require('helmet');
 
 app.use(helmet());
 
-// MongoDB connection
-// MongoDB connection
+// ------------------- Swagger Setup -------------------
+const swaggerUi = require('swagger-ui-express');
+const swaggerJsdoc = require('swagger-jsdoc');
+
+const swaggerOptions = {
+    definition: {
+        openapi: "3.0.0",
+        info: {
+            title: "MongoDB Inspector API",
+            version: "1.0.0",
+            description: "API to explore MongoDB collections, fields, and documents",
+        },
+    },
+    apis: ["./app.js"], // adjust if your filename differs
+};
+
+const swaggerSpec = swaggerJsdoc(swaggerOptions);
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+// ------------------- MongoDB Setup -------------------
 let uri;
 if (process.env.DB_USER && process.env.DB_PASSWORD) {
     uri = `mongodb://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}`;
@@ -20,7 +38,6 @@ const client = new MongoClient(uri);
 let db;
 let allowedCollections = [];
 
-// Connect to MongoDB
 async function initDb() {
     try {
         await client.connect();
@@ -57,6 +74,18 @@ const validateCollection = (req, res, next) => {
     next();
 };
 
+// ------------------- Routes -------------------
+
+/**
+ * @swagger
+ * /:
+ *   get:
+ *     summary: Landing page
+ *     description: Provides HTML instructions for using the MongoDB Inspector API
+ *     responses:
+ *       200:
+ *         description: HTML instruction page
+ */
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -103,7 +132,17 @@ app.get('/', (req, res) => {
     `);
 });
 
-// DB check
+/**
+ * @swagger
+ * /dbcheck:
+ *   get:
+ *     summary: Check database connection
+ *     responses:
+ *       200:
+ *         description: Database connection is healthy
+ *       500:
+ *         description: Database ping failed
+ */
 app.get('/dbcheck', async (req, res) => {
     app.set('json spaces', 2);
     try {
@@ -114,13 +153,40 @@ app.get('/dbcheck', async (req, res) => {
     }
 });
 
-// List all allowed collections
+/**
+ * @swagger
+ * /tables:
+ *   get:
+ *     summary: List allowed collections
+ *     responses:
+ *       200:
+ *         description: Array of collection names
+ */
 app.get('/tables', (req, res) => {
     app.set('json spaces', 2);
     res.json({ tables: allowedCollections });
 });
 
-// Get fields of a collection (sample first document)
+/**
+ * @swagger
+ * /tables/{tableName}/columns:
+ *   get:
+ *     summary: Get collection fields (sample document)
+ *     parameters:
+ *       - in: path
+ *         name: tableName
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Collection name
+ *     responses:
+ *       200:
+ *         description: Array of fields
+ *       400:
+ *         description: Invalid collection name
+ *       500:
+ *         description: Database query failed
+ */
 app.get('/tables/:tableName/columns', validateCollection, async (req, res) => {
     app.set('json spaces', 2);
     try {
@@ -134,7 +200,36 @@ app.get('/tables/:tableName/columns', validateCollection, async (req, res) => {
     }
 });
 
-// Get documents from a collection
+/**
+ * @swagger
+ * /tables/{tableName}/lines:
+ *   get:
+ *     summary: Get collection documents
+ *     parameters:
+ *       - in: path
+ *         name: tableName
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Collection name
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         description: Number of documents to return (max 500)
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *         description: Skip first N documents
+ *     responses:
+ *       200:
+ *         description: Array of documents
+ *       400:
+ *         description: Invalid collection name
+ *       500:
+ *         description: Database query failed
+ */
 app.get('/tables/:tableName/lines', validateCollection, async (req, res) => {
     app.set('json spaces', 2);
     try {
@@ -149,7 +244,9 @@ app.get('/tables/:tableName/lines', validateCollection, async (req, res) => {
     }
 });
 
+// ------------------- Start Server -------------------
 const PORT = 3000;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    console.log(`Swagger docs available at http://localhost:${PORT}/docs`);
 });

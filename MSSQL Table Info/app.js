@@ -7,7 +7,26 @@ const helmet = require('helmet');
 app.use(helmet());
 app.use(express.json());
 
-// Create a MSSQL connection
+// ------------------- Swagger Setup -------------------
+const swaggerUi = require('swagger-ui-express');
+const swaggerJsdoc = require('swagger-jsdoc');
+
+const swaggerOptions = {
+    definition: {
+        openapi: "3.0.0",
+        info: {
+            title: "MSSQL Inspector API",
+            version: "1.0.0",
+            description: "API to explore MSSQL database tables, columns, and rows",
+        },
+    },
+    apis: ["./app.js"], // adjust if your filename differs
+};
+
+const swaggerSpec = swaggerJsdoc(swaggerOptions);
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+// ------------------- MSSQL Setup -------------------
 const mssqlConfig = {
     user: process.env.MSSQL_USER,
     password: process.env.MSSQL_PASSWORD,
@@ -26,7 +45,7 @@ const initTables = async () => {
         const pool = await sql.connect(mssqlConfig);
         const result = await pool.request()
             .query(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE'`);
-        
+
         const dbTables = result.recordset.map(r => r.TABLE_NAME);
 
         if (process.env.ALLOWED_TABLES) {
@@ -58,6 +77,18 @@ const validateTable = (req, res, next) => {
     next();
 };
 
+// ------------------- Routes -------------------
+
+/**
+ * @swagger
+ * /:
+ *   get:
+ *     summary: Landing page
+ *     description: Provides HTML instructions for using the MSSQL Inspector API
+ *     responses:
+ *       200:
+ *         description: HTML instruction page
+ */
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -104,6 +135,17 @@ app.get('/', (req, res) => {
     `);
 });
 
+/**
+ * @swagger
+ * /dbcheck:
+ *   get:
+ *     summary: Check database connection
+ *     responses:
+ *       200:
+ *         description: Database connection is healthy
+ *       500:
+ *         description: Database connection failed
+ */
 app.get('/dbcheck', async (req, res) => {
     try {
         const pool = await sql.connect(mssqlConfig);
@@ -114,11 +156,40 @@ app.get('/dbcheck', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /tables:
+ *   get:
+ *     summary: List allowed tables
+ *     responses:
+ *       200:
+ *         description: Array of table names
+ */
 app.get('/tables', async (req, res) => {
     app.set('json spaces', 2);
     res.json({ tables: allowedTables });
 });
 
+/**
+ * @swagger
+ * /tables/{tableName}/columns:
+ *   get:
+ *     summary: Get table columns
+ *     parameters:
+ *       - in: path
+ *         name: tableName
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Table name
+ *     responses:
+ *       200:
+ *         description: Array of column objects
+ *       400:
+ *         description: Invalid table name
+ *       500:
+ *         description: Database query failed
+ */
 app.get('/tables/:tableName/columns', validateTable, async (req, res) => {
     app.set('json spaces', 2);
     const tableName = req.params.tableName;
@@ -144,6 +215,36 @@ app.get('/tables/:tableName/columns', validateTable, async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /tables/{tableName}/lines:
+ *   get:
+ *     summary: Get table rows
+ *     parameters:
+ *       - in: path
+ *         name: tableName
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Table name
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         description: Number of rows to return (max 500)
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *         description: Skip first N rows
+ *     responses:
+ *       200:
+ *         description: Array of row objects
+ *       400:
+ *         description: Invalid table name
+ *       500:
+ *         description: Database query failed
+ */
 app.get('/tables/:tableName/lines', validateTable, async (req, res) => {
     app.set('json spaces', 2);
     const tableName = req.params.tableName;
@@ -161,7 +262,9 @@ app.get('/tables/:tableName/lines', validateTable, async (req, res) => {
     }
 });
 
+// ------------------- Start Server -------------------
 const PORT = 3000;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    console.log(`Swagger docs available at http://localhost:${PORT}/docs`);
 });

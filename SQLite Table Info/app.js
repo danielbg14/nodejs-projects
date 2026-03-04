@@ -4,10 +4,12 @@ const sqlite3 = require('sqlite3').verbose();
 require('dotenv').config();
 const helmet = require('helmet');
 const path = require('path');
+const swaggerUi = require('swagger-ui-express');
+const swaggerJsdoc = require('swagger-jsdoc');
 
 app.use(helmet());
 
-// Create a SQLite connection
+// ------------------- SQLite Setup -------------------
 const dbFile = process.env.DB_FILE || path.join(__dirname, 'test.db');
 const db = new sqlite3.Database(dbFile);
 
@@ -15,12 +17,8 @@ let allowedTables = [];
 
 const initTables = () => {
     db.all("SELECT name FROM sqlite_master WHERE type='table'", (err, rows) => {
-        if (err) {
-            console.error('Failed to fetch tables:', err);
-            return;
-        }
+        if (err) return console.error('Failed to fetch tables:', err);
 
-        // Make sure rows is an array
         const dbTables = rows.map(r => r.name);
 
         if (process.env.ALLOWED_TABLES) {
@@ -36,81 +34,105 @@ const initTables = () => {
 
 initTables();
 
+// ------------------- Swagger Setup -------------------
+const swaggerOptions = {
+    definition: {
+        openapi: "3.0.0",
+        info: {
+            title: "SQLite Inspector API",
+            version: "1.0.0",
+            description: "API to inspect your SQLite database structure and data"
+        }
+    },
+    apis: ["./app.js"] // adjust if your filename differs
+};
+
+const swaggerSpec = swaggerJsdoc(swaggerOptions);
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+// ------------------- Helper -------------------
 const validateTable = (req, res, next) => {
     const tableName = req.params.tableName;
 
-    if (!allowedTables.length) {
-        return res.status(503).json({ error: 'Tables not initialized yet' });
-    }
-
-    if (!allowedTables.includes(tableName)) {
-        return res.status(400).json({ error: 'Invalid table name' });
-    }
+    if (!allowedTables.length) return res.status(503).json({ error: 'Tables not initialized yet' });
+    if (!allowedTables.includes(tableName)) return res.status(400).json({ error: 'Invalid table name' });
 
     next();
 };
 
+// ------------------- Routes -------------------
+
+/**
+ * @swagger
+ * /:
+ *   get:
+ *     summary: Landing page
+ *     description: HTML instructions and endpoint overview
+ *     responses:
+ *       200:
+ *         description: HTML landing page
+ */
 app.get('/', (req, res) => {
-    res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>SQLite  Inspector API</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
-                h1 { color: #333; }
-                .box { background: white; padding: 20px; border-radius: 6px; margin-top: 20px; }
-                code { background: #eee; padding: 4px 6px; border-radius: 4px; }
-                pre { background: #272822; color: #f8f8f2; padding: 15px; border-radius: 6px; overflow-x: auto; }
-            </style>
-        </head>
-        <body>
-            <h1>SQLite  Database Inspector</h1>
-            <p>This API lets you explore your SQLite database structure and data.</p>
-
-            <div class="box">
-                <h2>Available Endpoints</h2>
-
-                <p><strong>Database connection check</strong></p>
-                <code>GET /dbcheck</code>
-
-                <p><strong>List all tables</strong></p>
-                <code>GET /tables</code>
-
-                <p><strong>Get table columns</strong></p>
-                <code>GET /tables/:tableName/columns</code>
-
-                <p><strong>Get table rows</strong></p>
-                <code>GET /tables/:tableName/lines</code>
-            </div>
-
-            <div class="box">
-                <h2>Example curl</h2>
-                <pre>curl http://localhost:3000/dbcheck</pre>
-                <pre>curl http://localhost:3000/tables</pre>
-                <pre>curl http://localhost:3000/tables/users/columns</pre>
-                <pre>curl http://localhost:3000/tables/users/lines</pre>
-            </div>
-        </body>
-        </html>
+    res.type('html').send(`
+        <h1>SQLite Database Inspector</h1>
+        <p>Endpoints:</p>
+        <ul>
+            <li>GET /dbcheck</li>
+            <li>GET /tables</li>
+            <li>GET /tables/:tableName/columns</li>
+            <li>GET /tables/:tableName/lines</li>
+        </ul>
+        <p>Swagger docs: <a href="/docs">/docs</a></p>
     `);
 });
 
+/**
+ * @swagger
+ * /dbcheck:
+ *   get:
+ *     summary: Check DB connection
+ *     responses:
+ *       200:
+ *         description: Database connection is healthy
+ */
 app.get('/dbcheck', (req, res) => {
     db.all("SELECT name FROM sqlite_master WHERE type='table'", (err, rows) => {
         if (err) return res.status(500).json({ status: 'error', message: 'DB error', error: err.message });
-        if (rows.length === 0) {
-            return res.status(500).json({ status: 'error', message: 'No tables found in database' });
-        }
+        if (rows.length === 0) return res.status(500).json({ status: 'error', message: 'No tables found in database' });
         res.json({ status: 'success', message: 'Database connection is healthy', tables: rows.map(r => r.name) });
     });
 });
 
+/**
+ * @swagger
+ * /tables:
+ *   get:
+ *     summary: List allowed tables
+ *     responses:
+ *       200:
+ *         description: Array of table names
+ */
 app.get('/tables', (req, res) => {
     app.set('json spaces', 2);
     res.json({ tables: allowedTables });
 });
 
+/**
+ * @swagger
+ * /tables/{tableName}/columns:
+ *   get:
+ *     summary: Get table columns
+ *     parameters:
+ *       - name: tableName
+ *         in: path
+ *         required: true
+ *         description: Name of the table
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Columns information
+ */
 app.get('/tables/:tableName/columns', validateTable, (req, res) => {
     const tableName = req.params.tableName;
     db.all(`PRAGMA table_info(${tableName})`, (err, rows) => {
@@ -127,6 +149,34 @@ app.get('/tables/:tableName/columns', validateTable, (req, res) => {
     });
 });
 
+/**
+ * @swagger
+ * /tables/{tableName}/lines:
+ *   get:
+ *     summary: Get table rows
+ *     parameters:
+ *       - name: tableName
+ *         in: path
+ *         required: true
+ *         description: Name of the table
+ *         schema:
+ *           type: string
+ *       - name: limit
+ *         in: query
+ *         required: false
+ *         schema:
+ *           type: integer
+ *         description: Max number of rows
+ *       - name: offset
+ *         in: query
+ *         required: false
+ *         schema:
+ *           type: integer
+ *         description: Number of rows to skip
+ *     responses:
+ *       200:
+ *         description: Table rows
+ */
 app.get('/tables/:tableName/lines', validateTable, (req, res) => {
     const tableName = req.params.tableName;
     const limit = Math.min(parseInt(req.query.limit) || 100, 500);
@@ -138,7 +188,9 @@ app.get('/tables/:tableName/lines', validateTable, (req, res) => {
     });
 });
 
+// ------------------- Start Server -------------------
 const PORT = 3000;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    console.log(`Swagger docs available at http://localhost:${PORT}/docs`);
 });
